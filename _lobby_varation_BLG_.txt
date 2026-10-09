@@ -1,0 +1,1529 @@
+﻿/* F8 World Code - space biome + military. */
+
+/* Space biome: y from SPACE_Y_MIN up to SPACE_Y (inclusive). Bedrock floor at SPACE_Y_MIN. */
+SPACE_Y = 99999
+SPACE_Y_MIN = 250
+SPACE_SKY = "space_blue"
+BEDROCK_FLOOR_R = 32
+/* Space spawn + protect (no setspawn / lobby redirect; no forced pad build) */
+SPAWN_X = 0
+SPAWN_Y = 260
+SPAWN_Z = 0
+SPAWN_PROTECT_R = 12
+SPAWN_PROTECT_H = 10
+SPAWN_SAFE_R = 10
+spawnProtectOn = false
+AST_CHUNK = 16
+AST_R = 5
+AST_LAYER = 20
+AST_BAND = 160
+MAX_MET = 8
+MAX_DEB = 10
+MET_EVENT_CD_MIN = 700
+MET_EVENT_CD_MAX = 36000
+MET_EVENT_DUR_MIN = 200
+MET_EVENT_DUR_MAX = 12000
+MET_EVENT_GAP_MIN = 3
+MET_EVENT_GAP_MAX = 7
+AST_CHANCE = 0.14
+WRECK_EVERY = 28
+STATION_EVERY = 1000
+ISLAND_EVERY = 40
+STATION_SPAWNERS = ["Draugr Zombie Spawner Block", "Magma Golem Spawner Block", "Frost Zombie Spawner Block", "Draugr Knight Spawner Block"]
+AST_BLOCKS = ["Stone", "Messy Stone", "Magma", "Obsidian", "Moonstone Ore", "Iron Ore"]
+MET_BLOCKS = ["Stone", "Messy Stone", "Magma", "Obsidian", "Moonstone Ore", "Iron Ore", "Gold Ore", "Diamond Ore", "Sand", "Sandstone"]
+WRECK_DEBRIS = ["Cobweb", "Messy Stone", "Dirt", "Hay Bale", "Jungle Wood Planks", "Sand", "Gravel", "Glass", "Mossy Messy Stone", "Gray Concrete", "Stone Bricks", "Bricks", "Maple Wood Planks", "Mossy Stone Bricks"]
+ISLAND_SAPLINGS = ["Pine Sapling", "Plum Sapling", "Palm Sapling", "Pear Sapling", "Maple Sapling", "Cedar Sapling", "Mango Sapling", "Aspen Sapling", "Jungle Sapling", "Cherry Sapling", "Spectral Sapling"]
+ISLAND_ORES = ["Coal Ore", "Iron Ore", "Gold Ore", "Diamond Ore", "Moonstone Ore"]
+ISLAND_SPAWNERS = ["Iron Guardian Spawner Block", "Gold Guardian Spawner Block", "Diamond Guardian Spawner Block", "Moonstone Guardian Spawner Block"]
+/* Tier 0..4 dungeon-style loot (Mysterious Ruins) */
+TIER_LOOT = [
+    [["Apple", 8], ["Bread", 4], ["Coal", 10], ["Stick", 8], ["Messy Stone", 16], ["Cobweb", 4], ["Maple Wood Planks", 10], ["Dirt", 12]],
+    [["Iron Bar", 8], ["Coal", 14], ["Apple", 6], ["Bread", 5], ["Stone Pickaxe", 1], ["Stone Sword", 1], ["Messy Stone", 20], ["Gray Concrete", 8], ["Glass", 8]],
+    [["Gold Bar", 5], ["Iron Bar", 12], ["Coal", 12], ["Cornbread", 4], ["Iron Pickaxe", 1], ["Iron Sword", 1], ["Iron Helmet", 1], ["Iron Boots", 1], ["Stone Bricks", 12], ["White Ceramic", 6]],
+    [["Gold Bar", 8], ["Iron Bar", 10], ["Gold Sword", 1], ["Gold Pickaxe", 1], ["Iron Chestplate", 1], ["Gold Helmet", 1], ["Golem Eye", 2], ["Knight Heart", 1], ["Aura XP Fragment", 8], ["Bricks", 10]],
+    [["Diamond", 2], ["Moonstone", 2], ["Gold Bar", 6], ["Diamond Sword", 1], ["Diamond Pickaxe", 1], ["Gold Chestplate", 1], ["Caught Mob Spirit_Golem Default", 1], ["Caught Mob Spirit_Wolf Default", 1], ["Moonstone Fragment", 3], ["Diamond Fragment", 3]]
+]
+TIER_CHESTS = ["Chest", "Loot Chest", "Loot Chest", "Loot Chest", "Loot Chest"]
+WRECK_BLOCK_LOOT = [
+    ["Jungle Wood Planks", 12],
+    ["Cobweb", 4],
+    ["Grass Block", 8],
+    ["Hay Bale", 6],
+    ["Dirt", 24]
+]
+STATION_GEAR = [
+    ["Stone Pickaxe", 1], ["Stone Sword", 1], ["Iron Pickaxe", 1], ["Iron Sword", 1], ["Iron Axe", 1],
+    ["Iron Helmet", 1], ["Iron Chestplate", 1], ["Iron Leggings", 1], ["Iron Boots", 1],
+    ["Gold Pickaxe", 1], ["Gold Sword", 1], ["Gold Axe", 1], ["Gold Helmet", 1], ["Gold Chestplate", 1],
+    ["Diamond Pickaxe", 1], ["Diamond Sword", 1], ["Diamond Helmet", 1], ["Diamond Chestplate", 1],
+    ["Military Helmet", 1], ["Military Chestplate", 1], ["Military Leggings", 1], ["Military Boots", 1], ["Military Gauntlets", 1]
+]
+DEB_BLOCKS = ["Stone", "Messy Stone", "Magma", "Moonstone Ore", "Gold Ore", "Diamond Ore", "Sand"]
+
+spacePlayers = {}
+asteroidDone = {}
+meteors = []
+floatingDebris = []
+spaceTick = 0
+WORLD_SALT = null
+meteorEvent = null
+meteorEventNext = 200 + Math.floor(Math.random() * 500)
+kitDone = {}
+pendingKit = {}
+
+function doSetPos(id, x, y, z) {
+    try { api.setPosition(id, [x, y, z]); return } catch (e1) {}
+    try { api.setPosition(id, x, y, z) } catch (e2) {}
+}
+
+reloadPending = {}
+activeHelmetEffects = {}
+WEAPON_STATION = "Artisan Bench"
+/* gun, iron, gold, diamond, coal, moon */
+WEAPON_CRAFTS = [
+    ["M1911|RequiresAmmo", 8, 0, 0, 4, 0], ["Block-19|RequiresAmmo", 10, 2, 0, 4, 0], ["Deagle|RequiresAmmo", 12, 4, 0, 4, 0],
+    ["Mini Izu|RequiresAmmo", 10, 3, 0, 6, 0], ["MP40|RequiresAmmo", 14, 3, 0, 8, 0], ["Double Barrel|RequiresAmmo", 12, 2, 0, 6, 0],
+    ["FMR|RequiresAmmo", 16, 4, 1, 8, 0], ["AK-47|RequiresAmmo", 18, 5, 1, 8, 0], ["M16|RequiresAmmo", 18, 5, 1, 8, 0],
+    ["TAR-21|RequiresAmmo", 16, 4, 2, 6, 0], ["SKAR|RequiresAmmo", 16, 4, 2, 6, 0], ["Striker-12|RequiresAmmo", 14, 5, 0, 8, 0],
+    ["DMR|RequiresAmmo", 20, 6, 3, 10, 0], ["VSR|RequiresAmmo", 22, 8, 4, 10, 0], ["AWP|RequiresAmmo", 25, 10, 5, 12, 0],
+    ["GPMG|RequiresAmmo", 28, 8, 2, 10, 2], ["Minigun|RequiresAmmo", 32, 10, 3, 12, 4]
+]
+VISION_HELMETS = {
+    "Sanguine Helmet": {
+        displayName: "Sanguine Helmet",
+        description: "Thermal imager. Grants X-Ray Vision while equipped.",
+        effect: "X-Ray Vision",
+        marker: "xrayHelmet",
+        recipe: [
+            { items: ["Diamond"], amt: 4 },
+            { items: ["Gold Bar"], amt: 3 },
+            { items: ["Iron Bar"], amt: 6 },
+            { items: ["Magma"], amt: 4 }
+        ]
+    },
+    "Spectral Helmet": {
+        displayName: "Spectral Helmet",
+        description: "Night vision. Grants Night Vision while equipped.",
+        effect: "Night Vision",
+        marker: "nightVisionHelmet",
+        recipe: [
+            { items: ["Diamond"], amt: 4 },
+            { items: ["Gold Bar"], amt: 5 },
+            { items: ["Iron Bar"], amt: 8 },
+            { items: ["Moonstone"], amt: 2 }
+        ]
+    }
+}
+
+function setupWeaponCrafts(playerId) {
+    var i, w, req
+    api.editItemCraftingRecipes(playerId, "Ammo", [{
+        requires: [{ items: ["Iron Bar"], amt: 1 }],
+        produces: 4,
+        station: "Workbench"
+    }])
+    for (i = 0; i < WEAPON_CRAFTS.length; i++) {
+        w = WEAPON_CRAFTS[i]
+        req = []
+        if (w[1]) req.push({ items: ["Iron Bar"], amt: w[1] })
+        if (w[2]) req.push({ items: ["Gold Bar"], amt: w[2] })
+        if (w[3]) req.push({ items: ["Diamond"], amt: w[3] })
+        if (w[4]) req.push({ items: ["Coal"], amt: w[4] })
+        if (w[5]) req.push({ items: ["Moonstone"], amt: w[5] })
+        api.editItemCraftingRecipes(playerId, w[0], [{ requires: req, produces: 1, station: WEAPON_STATION }])
+    }
+}
+
+function setVisionHelmetRecipes(playerId) {
+    var itemNames = ["Sanguine Helmet", "Spectral Helmet"]
+    var i, itemName, config
+    for (i = 0; i < itemNames.length; i++) {
+        itemName = itemNames[i]
+        config = VISION_HELMETS[itemName]
+        api.editItemCraftingRecipes(playerId, itemName, [{
+            requires: config.recipe,
+            produces: 1,
+            station: WEAPON_STATION,
+            attributes: {
+                customDisplayName: config.displayName,
+                customDescription: config.description,
+                customAttributes: { visionHelmet: config.marker }
+            }
+        }])
+    }
+}
+
+function getEquippedVisionEffects(playerId) {
+    var helmet, config
+    try {
+        helmet = api.getItemSlot(playerId, 46)
+    } catch (error) {
+        return []
+    }
+    if (!helmet) return []
+    if (helmet.name === "Kingly Diamond Helmet") {
+        return ["X-Ray Vision", "Night Vision"]
+    }
+    config = VISION_HELMETS[helmet.name]
+    if (!config) return []
+    return [config.effect]
+}
+
+function updateVisionHelmet(playerId) {
+    var requiredEffects = getEquippedVisionEffects(playerId)
+    var requiredKey = requiredEffects.join("|")
+    var currentKey = activeHelmetEffects[playerId] || ""
+    var oldEffects, i, effect
+    if (currentKey === requiredKey) return
+    if (currentKey) {
+        oldEffects = currentKey.split("|")
+        for (i = 0; i < oldEffects.length; i++) {
+            effect = oldEffects[i]
+            if (!effect) continue
+            try { api.removeEffect(playerId, effect) } catch (error) {}
+        }
+    }
+    delete activeHelmetEffects[playerId]
+    if (requiredKey) {
+        for (i = 0; i < requiredEffects.length; i++) {
+            try {
+                api.applyEffect(playerId, requiredEffects[i], null, {})
+            } catch (error) {}
+        }
+        activeHelmetEffects[playerId] = requiredKey
+    }
+}
+
+function tagCraftedVisionHelmet(playerId, itemName) {
+    var config = VISION_HELMETS[itemName]
+    var i, item, att, ca
+    if (!config) return
+    for (i = 0; i < 50; i++) {
+        item = api.getItemSlot(playerId, i)
+        if (!item || item.name !== itemName) continue
+        att = item.attributes || {}
+        ca = att.customAttributes || {}
+        if (att.customDisplayName === config.displayName) continue
+        if (ca.visionHelmet === config.marker) continue
+        api.setItemSlot(playerId, i, itemName, item.amount || 1, {
+            customDisplayName: config.displayName,
+            customDescription: config.description,
+            customAttributes: { visionHelmet: config.marker }
+        })
+        return
+    }
+}
+
+function isGun(name) {
+    return name && name.indexOf("|RequiresAmmo") >= 0
+}
+
+function gunMag(name) {
+    if (name.indexOf("Double Barrel") >= 0) return 2
+    if (name.indexOf("AWP") >= 0 || name.indexOf("VSR") >= 0 || name.indexOf("DMR") >= 0) return 5
+    if (name.indexOf("Minigun") >= 0) return 100
+    if (name.indexOf("GPMG") >= 0) return 60
+    if (name.indexOf("Striker") >= 0) return 8
+    if (name.indexOf("Deagle") >= 0 || name.indexOf("M1911") >= 0 || name.indexOf("Block-19") >= 0 || name.indexOf("Mini Izu") >= 0) return 12
+    return 30
+}
+
+function gunReloadMs(name) {
+    if (name.indexOf("AWP") >= 0 || name.indexOf("VSR") >= 0) return 2800
+    if (name.indexOf("Minigun") >= 0 || name.indexOf("GPMG") >= 0) return 3500
+    if (name.indexOf("Double Barrel") >= 0 || name.indexOf("Striker") >= 0) return 2200
+    return 1800
+}
+
+function gunShots(item, mag) {
+    if (!item || !item.attributes || item.attributes.shotsLeft === undefined) return mag
+    return item.attributes.shotsLeft
+}
+
+
+function ensureWorldSalt() {
+    var v, i, s, h
+    if (WORLD_SALT !== null) return
+    try {
+        v = api.getLobbyDbValue("ws")
+        if (typeof v === "number" && v) { WORLD_SALT = v | 0; return }
+    } catch (e1) {}
+    h = 2166136261
+    try { s = String(api.getLobbyName() || "") } catch (e2) { s = "" }
+    for (i = 0; i < s.length; i++) h = ((h ^ s.charCodeAt(i)) * 16777619) | 0
+    WORLD_SALT = (h ^ ((Math.random() * 4294967296) | 0)) | 0
+    if (!WORLD_SALT) WORLD_SALT = 1
+    try { api.setLobbyDbValue("ws", WORLD_SALT) } catch (e3) {}
+}
+
+function spaceHash(a, b, c) {
+    ensureWorldSalt()
+    var n = (a | 0) * 374761393 + (b | 0) * 668265263 + (c | 0) * 1274126177 + (WORLD_SALT | 0) * 2246822519
+    n = (n ^ (n >> 13)) * 1274126177
+    return ((n ^ (n >> 16)) >>> 0) / 4294967296
+}
+
+function spacePick(arr, seed) {
+    return arr[Math.floor(seed * arr.length) % arr.length]
+}
+
+function spaceDist2(ax, ay, az, bx, by, bz) {
+    var dx = ax - bx
+    var dy = ay - by
+    var dz = az - bz
+    return dx * dx + dy * dy + dz * dz
+}
+
+function spaceFloorY(x, z) {
+    return SPACE_Y
+}
+
+function isInSpaceY(y) {
+    return y <= SPACE_Y && y >= SPACE_Y_MIN
+}
+
+function ensureSpaceBedrockFloor(px, pz) {
+    var x0 = Math.floor(px) - BEDROCK_FLOOR_R
+    var z0 = Math.floor(pz) - BEDROCK_FLOOR_R
+    var x1 = Math.floor(px) + BEDROCK_FLOOR_R
+    var z1 = Math.floor(pz) + BEDROCK_FLOOR_R
+    var x, z, y, placed
+    y = SPACE_Y_MIN
+    placed = 0
+    for (x = x0; x <= x1; x++) {
+        for (z = z0; z <= z1; z++) {
+            if (!api.isBlockInLoadedChunk(x, y, z)) continue
+            try {
+                if (api.getBlock(x, y, z) !== "Bedrock") api.setBlock(x, y, z, "Bedrock")
+            } catch (e) {}
+            placed++
+            if (placed >= 80) return
+        }
+    }
+}
+
+function inSpawnProtect(x, y, z) {
+    var dx, dz, r
+    dx = x - SPAWN_X
+    dz = z - SPAWN_Z
+    r = SPAWN_PROTECT_R
+    if (dx * dx + dz * dz > r * r) return false
+    if (y < SPAWN_Y - 1 || y > SPAWN_Y + SPAWN_PROTECT_H) return false
+    return true
+}
+
+function playerInSpawnProtect(playerId) {
+    var p
+    try { p = api.getPosition(playerId) } catch (e) { return false }
+    if (!p) return false
+    return inSpawnProtect(p[0], p[1], p[2])
+}
+
+function applySpawnProtection() {
+    var a, b
+    a = [SPAWN_X - SPAWN_PROTECT_R, SPAWN_Y - 1, SPAWN_Z - SPAWN_PROTECT_R]
+    b = [SPAWN_X + SPAWN_PROTECT_R, SPAWN_Y + SPAWN_PROTECT_H, SPAWN_Z + SPAWN_PROTECT_R]
+    try { api.setCantChangeBlockRect(a, b) } catch (e1) {}
+    try { api.setCantChangeBlockRect(b, a) } catch (e2) {}
+    spawnProtectOn = true
+}
+
+function spaceSpawnPos() {
+    return [SPAWN_X + 1.5, SPAWN_Y + 1.2, SPAWN_Z + 0.5]
+}
+
+function nearSpacePad(x, y, z) {
+    return spaceDist2(x, y, z, SPAWN_X, SPAWN_Y, SPAWN_Z) < SPAWN_SAFE_R * SPAWN_SAFE_R
+}
+
+function sendToSpaceSpawn(playerId) {
+    var p
+    p = spaceSpawnPos()
+    doSetPos(playerId, p[0], p[1], p[2])
+    if (!spawnProtectOn) applySpawnProtection()
+    spacePlayers[playerId] = true
+    applySpaceLook(playerId, true)
+}
+
+function applySpaceLook(playerId, inSpace) {
+    if (inSpace) {
+        api.setClientOptions(playerId, {
+            skyBox: SPACE_SKY,
+            fogColourOverride: "#000000",
+            ambientLightColourOverride: "#050508",
+            skyLightColourOverride: "#0a0a14",
+            gravityMultiplier: 0.42
+        })
+    } else {
+        api.setClientOptionToDefault(playerId, "skyBox")
+        api.setClientOptionToDefault(playerId, "fogColourOverride")
+        api.setClientOptionToDefault(playerId, "ambientLightColourOverride")
+        api.setClientOptionToDefault(playerId, "skyLightColourOverride")
+        api.setClientOptionToDefault(playerId, "gravityMultiplier")
+    }
+}
+
+function playSpaceParticles(x, y, z, count, size, r, g, b, life) {
+    api.playParticleEffect({
+        dir1: [-1, -1, -1],
+        dir2: [1, 1, 1],
+        pos1: [x - 0.4, y - 0.4, z - 0.4],
+        pos2: [x + 0.4, y + 0.4, z + 0.4],
+        texture: "square_particle",
+        minLifeTime: life * 0.5,
+        maxLifeTime: life,
+        minEmitPower: 1,
+        maxEmitPower: 4,
+        minSize: size * 0.5,
+        maxSize: size,
+        manualEmitCount: count,
+        gravity: [0, -2, 0],
+        colorGradients: [{
+            timeFraction: 0,
+            minColor: [r, g, b, 1],
+            maxColor: [255, 220, 80, 1]
+        }],
+        velocityGradients: [{ timeFraction: 0, factor: 1, factor2: 1.4 }],
+        blendMode: 2
+    })
+}
+
+function astRock(x, y, z, pal) {
+    var n = spaceHash(x, y + 17, z)
+    var r = spaceHash(x + 31, y, z + 47)
+    if (r > 0.98) return "Lunite Ore"
+    if (pal === 2) {
+        if (n > 0.85) return "Sandstone"
+        if (n > 0.7) return "Red Sand"
+        return "Sand"
+    }
+    if (pal === 1) {
+        if (n > 0.88) return "Messy Stone"
+        if (n > 0.72) return "Sandstone"
+        return "Yellowstone"
+    }
+    if (n > 0.92) return "Moonstone Ore"
+    if (n > 0.82) return "Magma"
+    if (n > 0.72) return "Iron Ore"
+    if (n > 0.58) return "Obsidian"
+    if (n > 0.4) return "Messy Stone"
+    return "Stone"
+}
+
+function astPut(x, y, z, pal) {
+    if (!api.isBlockInLoadedChunk(x, y, z)) return
+    if (api.getBlock(x, y, z) !== "Air") return
+    api.setBlock(x, y, z, astRock(x, y, z, pal))
+}
+
+function placeAsteroidAt(cx, cy, cz, radius, shape, pal) {
+    if (radius < 2) radius = 2
+    var rx = radius
+    var ry = radius
+    var rz = radius
+    var cube = false
+    if (shape === 1) cube = true
+    else if (shape === 2) { rx = radius + 3; ry = radius; rz = radius }
+    else if (shape === 3) { rx = radius; ry = radius + 3; rz = radius }
+    else if (shape === 4) { rx = radius; ry = radius; rz = radius + 3 }
+    else if (shape === 5) { rx = radius + 2; ry = radius; rz = radius + 2 }
+    else if (shape === 6) { rx = radius + 2; ry = radius; rz = radius }
+    var dx, dy, dz, nx, ny, nz
+    for (dx = -rx; dx <= rx; dx++) {
+        for (dy = -ry; dy <= ry; dy++) {
+            for (dz = -rz; dz <= rz; dz++) {
+                if (cube) {
+                    if (Math.abs(dx) === rx && Math.abs(dy) === ry && Math.abs(dz) === rz) continue
+                } else {
+                    nx = dx / rx
+                    ny = dy / ry
+                    nz = dz / rz
+                    if (nx * nx + ny * ny + nz * nz > 1) continue
+                    if (spaceHash(cx + dx, cy + dy, cz + dz) > 0.82 && nx * nx + ny * ny + nz * nz > 0.55) continue
+                }
+                astPut(cx + dx, cy + dy, cz + dz, pal)
+            }
+        }
+    }
+}
+
+function stPut(x, y, z, b) {
+    if (!api.isBlockInLoadedChunk(x, y, z)) return false
+    api.setBlock(x, y, z, b)
+    return true
+}
+
+function placeSpawner(x, y, z, blockName) {
+    var dx, dy, dz, bx, by, bz
+    for (dx = -2; dx <= 2; dx++) {
+        for (dz = -2; dz <= 2; dz++) {
+            for (dy = 0; dy <= 6; dy++) {
+                if (dx === 0 && dy === 0 && dz === 0) continue
+                bx = x + dx
+                by = y + dy
+                bz = z + dz
+                if (!api.isBlockInLoadedChunk(bx, by, bz)) continue
+                api.setBlock(bx, by, bz, "Air")
+            }
+        }
+    }
+    return stPut(x, y, z, blockName)
+}
+
+function stationDoorHole(i, j, k, sx, sy, sz, xp, xn, zp, zn, jMin, jMax) {
+    if (jMin === undefined) jMin = 1
+    if (jMax === undefined) jMax = sy - 2
+    if (j < jMin || j > jMax) return 0
+    if (j === 0 || j === sy - 1) return 0
+    var z0 = Math.floor((sz - 6) / 2)
+    var x0 = Math.floor((sx - 6) / 2)
+    if (xp && i === sx - 1 && k >= z0 && k < z0 + 6) return 1
+    if (xn && i === 0 && k >= z0 && k < z0 + 6) return 1
+    if (zp && k === sz - 1 && i >= x0 && i < x0 + 6) return 1
+    if (zn && k === 0 && i >= x0 && i < x0 + 6) return 1
+    return 0
+}
+
+function stationShell(x0, y0, z0, sx, sy, sz, xp, xn, zp, zn, loot, spawn, holeFx, holeFz, holeFloor) {
+    if (holeFx === undefined) holeFx = -1
+    var i, j, k, x, y, z, n
+    for (i = 0; i < sx; i++) {
+        for (j = 0; j < sy; j++) {
+            for (k = 0; k < sz; k++) {
+                x = x0 + i
+                y = y0 + j
+                z = z0 + k
+                if (holeFx >= 0 && i >= holeFx && i < holeFx + 2 && k >= holeFz && k < holeFz + 2) {
+                    if (j === sy - 1 || (holeFloor && j === 0)) {
+                        stPut(x, y, z, "Air")
+                        continue
+                    }
+                }
+                if (i > 0 && i < sx - 1 && j > 0 && j < sy - 1 && k > 0 && k < sz - 1) {
+                    stPut(x, y, z, "Air")
+                    continue
+                }
+                if (stationDoorHole(i, j, k, sx, sy, sz, xp, xn, zp, zn, 1, 4)) {
+                    stPut(x, y, z, "Air")
+                    continue
+                }
+                n = spaceHash(x, y, z)
+                if (j > 0 && n > 0.9) continue
+                stPut(x, y, z, wreckHullBlock(1, n))
+            }
+        }
+    }
+    if (loot) {
+        x = x0 + Math.floor(sx / 2)
+        z = z0 + Math.floor(sz / 2)
+        if (stPut(x, y0 + 1, z, "Chest")) fillStationChest(x, y0 + 1, z, 1)
+    }
+}
+
+function stationSpawnerRoom(x0, y0, z0, sx, sz, xp, xn, zp, zn, loot) {
+    var mid = 8
+    var sy = 17
+    var ci = Math.floor(sx / 2)
+    var ck = Math.floor(sz / 2)
+    var i, j, k, x, y, z, n, isMid, isFloor, isCeil, isWall, dx, dz, d2, lim, a, b
+    function inCrash(ii, kk) {
+        dx = ii - ci
+        dz = kk - ck
+        d2 = dx * dx + dz * dz
+        lim = 2.1 + spaceHash(x0 + ii, 19, z0 + kk) * 4.2
+        return d2 <= lim
+    }
+    function onCrashRim(ii, kk) {
+        if (inCrash(ii, kk)) return 0
+        for (a = -1; a <= 1; a++) {
+            for (b = -1; b <= 1; b++) {
+                if (a === 0 && b === 0) continue
+                if (inCrash(ii + a, kk + b)) return 1
+            }
+        }
+        return 0
+    }
+    for (i = 0; i < sx; i++) {
+        for (j = 0; j < sy; j++) {
+            for (k = 0; k < sz; k++) {
+                x = x0 + i
+                y = y0 + j
+                z = z0 + k
+                isMid = j === mid
+                isFloor = j === 0
+                isCeil = j === sy - 1
+                isWall = i === 0 || i === sx - 1 || k === 0 || k === sz - 1
+                if ((isMid || isCeil) && inCrash(i, k)) {
+                    stPut(x, y, z, "Air")
+                    continue
+                }
+                if (isMid && onCrashRim(i, k)) {
+                    n = spaceHash(x, y + 2, z)
+                    stPut(x, y, z, n > 0.45 ? "Magma" : (n > 0.2 ? "Obsidian" : "Messy Stone"))
+                    continue
+                }
+                if (isCeil && onCrashRim(i, k) && spaceHash(x, 7, z) > 0.4) {
+                    stPut(x, y, z, "Magma")
+                    continue
+                }
+                if (!isFloor && !isCeil && !isWall && !isMid) {
+                    stPut(x, y, z, "Air")
+                    continue
+                }
+                if (stationDoorHole(i, j, k, sx, sy, sz, xp, xn, zp, zn, 1, 4)) {
+                    stPut(x, y, z, "Air")
+                    continue
+                }
+                if (stationDoorHole(i, j, k, sx, sy, sz, xp, xn, zp, zn, mid + 1, mid + 4)) {
+                    stPut(x, y, z, "Air")
+                    continue
+                }
+                n = spaceHash(x, y, z)
+                if (!isFloor && n > 0.92) continue
+                stPut(x, y, z, wreckHullBlock(1, n))
+            }
+        }
+    }
+    placeSpawner(
+        x0 + ci,
+        y0 + 1,
+        z0 + ck,
+        STATION_SPAWNERS[Math.floor(spaceHash(x0, y0, z0) * 4)]
+    )
+    for (j = 2; j < sy; j++) {
+        for (i = ci - 1; i <= ci + 1; i++) {
+            for (k = ck - 1; k <= ck + 1; k++) {
+                if (i <= 0 || i >= sx - 1 || k <= 0 || k >= sz - 1) continue
+                if (!inCrash(i, k) && !(i === ci && k === ck)) continue
+                if (api.isBlockInLoadedChunk(x0 + i, y0 + j, z0 + k)) {
+                    api.setBlock(x0 + i, y0 + j, z0 + k, "Air")
+                }
+            }
+        }
+    }
+    for (i = 1; i < sx - 1; i++) {
+        for (k = 1; k < sz - 1; k++) {
+            if (!onCrashRim(i, k)) continue
+            n = spaceHash(x0 + i, mid + 2, z0 + k)
+            stPut(x0 + i, y0 + mid, z0 + k, n > 0.45 ? "Magma" : (n > 0.2 ? "Obsidian" : "Messy Stone"))
+            if (spaceHash(x0 + i, 11, z0 + k) > 0.55) {
+                stPut(x0 + i, y0 + sy - 1, z0 + k, "Magma")
+            }
+        }
+    }
+    for (i = ci - 3; i <= ci + 3; i++) {
+        for (k = ck - 3; k <= ck + 3; k++) {
+            if (i === ci && k === ck) continue
+            if (i <= 0 || i >= sx - 1 || k <= 0 || k >= sz - 1) continue
+            n = spaceHash(x0 + i, 44, z0 + k)
+            if (n > 0.72) stPut(x0 + i, y0 + 1, z0 + k, n > 0.88 ? "Magma" : "Messy Stone")
+        }
+    }
+    for (j = 1; j <= mid + 1; j++) {
+        stPut(x0 + 2, y0 + j, z0 + 2, "Iron Ladder")
+    }
+    if (loot) {
+        if (stPut(x0 + 2, y0 + 1, z0 + sz - 3, "Chest")) {
+            fillStationChest(x0 + 2, y0 + 1, z0 + sz - 3, 1)
+        }
+        if (stPut(x0 + sx - 3, y0 + mid + 1, z0 + sz - 3, "Chest")) {
+            fillStationChest(x0 + sx - 3, y0 + mid + 1, z0 + sz - 3, 2)
+        }
+    }
+}
+
+function stationCorridor(x0, y0, z0, len, alongZ) {
+    var i, j, k, x, y, z, n
+    for (i = 0; i < len; i++) {
+        for (j = 0; j < 6; j++) {
+            for (k = 0; k < 9; k++) {
+                x = alongZ ? x0 + j : x0 + i
+                y = y0 + k
+                z = alongZ ? z0 + i : z0 + j
+                if (k > 0 && k < 8 && j > 0 && j < 5) {
+                    stPut(x, y, z, "Air")
+                    if (i === 6 && j === 2 && k === 1 && spaceHash(x0, y0, z0) > 0.7) {
+                        if (stPut(x, y, z, "Chest")) fillStationChest(x, y, z, 0)
+                    }
+                    continue
+                }
+                n = spaceHash(x, y, z)
+                if (k > 0 && n > 0.92) continue
+                stPut(x, y, z, wreckHullBlock(1, n))
+            }
+        }
+    }
+}
+
+function corrFrom(rx, rz, rsx, rsz, dir, len) {
+    var mz = Math.floor((rsz - 6) / 2)
+    var mx = Math.floor((rsx - 6) / 2)
+    if (dir === 0) return { x: rx + rsx, z: rz + mz, az: 0 }
+    if (dir === 2) return { x: rx - len, z: rz + mz, az: 0 }
+    if (dir === 1) return { x: rx + mx, z: rz + rsz, az: 1 }
+    return { x: rx + mx, z: rz - len, az: 1 }
+}
+
+function roomAfter(c, dir, len, rs) {
+    var mid = Math.floor((rs - 6) / 2)
+    if (dir === 0) return { x: c.x + len, z: c.z - mid }
+    if (dir === 2) return { x: c.x - rs, z: c.z - mid }
+    if (dir === 1) return { x: c.x - mid, z: c.z + len }
+    return { x: c.x - mid, z: c.z - rs }
+}
+
+function stationWalk(rx, ry, rz, rsx, rsz, dir, bid, depth) {
+    if (depth > 3) return
+    var RS = 10
+    var len = 8 + Math.floor(spaceHash(rx, bid * 13 + depth, rz) * 8)
+    var c = corrFrom(rx, rz, rsx, rsz, dir, len)
+    stationCorridor(c.x, ry, c.z, len, c.az)
+    var room = roomAfter(c, dir, len, RS)
+    var turn = Math.floor(spaceHash(rx, depth + 41, rz + bid) * 3)
+    var ndir = turn === 1 ? dir : turn === 0 ? (dir + 1) % 4 : (dir + 3) % 4
+    var xp = 0
+    var xn = 0
+    var zp = 0
+    var zn = 0
+    if (dir === 0) xn = 1
+    if (dir === 2) xp = 1
+    if (dir === 1) zn = 1
+    if (dir === 3) zp = 1
+    if (depth < 3) {
+        if (ndir === 0) xp = 1
+        if (ndir === 2) xn = 1
+        if (ndir === 1) zp = 1
+        if (ndir === 3) zn = 1
+    }
+    if (depth === 1) {
+        stationSpawnerRoom(room.x, ry, room.z, RS, RS, xp, xn, zp, zn, 0)
+    } else {
+        stationShell(room.x, ry, room.z, RS, 9, RS, xp, xn, zp, zn, depth === 3, 0)
+    }
+    if (depth < 3) stationWalk(room.x, ry, room.z, RS, RS, ndir, bid, depth + 1)
+}
+
+function placeStation(ox, oy, oz) {
+    var HS = 12
+    var used = [0, 0, 0, 0]
+    var starts = []
+    var b, dir, i
+    for (b = 0; b < 3; b++) {
+        dir = Math.floor(spaceHash(ox, b + 11, oz) * 4)
+        for (i = 0; i < 4 && used[dir]; i++) dir = (dir + 1) % 4
+        used[dir] = 1
+        starts.push(dir)
+    }
+    stationSpawnerRoom(ox, oy, oz, HS, HS, used[0], used[2], used[1], used[3], 1)
+    for (b = 0; b < starts.length; b++) {
+        stationWalk(ox, oy, oz, HS, HS, starts[b], b, 0)
+    }
+}
+
+function markStationChunks(wx, wy, wz) {
+    var ocx = Math.floor(wx / AST_CHUNK)
+    var ocz = Math.floor(wz / AST_CHUNK)
+    var ly = Math.floor(wy / AST_LAYER)
+    var a, b, c
+    for (a = -6; a <= 6; a++) {
+        for (b = -1; b <= 1; b++) {
+            for (c = -6; c <= 6; c++) {
+                asteroidDone[ocx + a + "_" + (ly + b) + "_" + (ocz + c)] = true
+            }
+        }
+    }
+}
+
+function trySet(x, y, z, b) {
+    if (!api.isBlockInLoadedChunk(x, y, z)) return false
+    if (api.getBlock(x, y, z) !== "Air") return false
+    api.setBlock(x, y, z, b)
+    return true
+}
+
+function wreckHullBlock(type, n) {
+    if (n > 0.93) return type === 2 ? "Magma" : "Obsidian"
+    if (n > 0.78) return "Mossy Stone Bricks"
+    if (n > 0.58) return "Mossy Messy Stone"
+    if (n > 0.38) return "Messy Stone"
+    return "Stone"
+}
+
+function fillTierChest(x, y, z, tier) {
+    if (tier < 0) tier = 0
+    if (tier > 4) tier = 4
+    var loot = TIER_LOOT[tier]
+    var slots = 4 + Math.floor(spaceHash(x, 11, z) * (3 + tier))
+    var used = {}
+    var i, it, amt, slot, pool, rolls, r
+    rolls = 3 + Math.floor(spaceHash(x, 12, z) * (2 + tier))
+    for (i = 0; i < rolls; i++) {
+        slot = Math.floor(spaceHash(x, 20 + i, z) * slots)
+        while (used[slot]) slot = (slot + 1) % slots
+        used[slot] = 1
+        it = loot[Math.floor(spaceHash(x, y + i + 4, z) * loot.length) % loot.length]
+        amt = it[1] <= 1 ? 1 : 1 + Math.floor(spaceHash(x + i, y, z) * it[1])
+        api.setStandardChestItemSlot([x, y, z], slot, it[0], amt)
+    }
+    if (tier >= 2 && spaceHash(x, 14, z) > 0.55) {
+        slot = Math.floor(spaceHash(x, 15, z) * slots)
+        while (used[slot]) slot = (slot + 1) % slots
+        pool = tier >= 4 ? STATION_GEAR : STATION_GEAR.slice(0, tier >= 3 ? 14 : 9)
+        api.setStandardChestItemSlot([x, y, z], slot, pool[Math.floor(spaceHash(x, 16, z) * pool.length)][0], 1)
+    }
+    if (tier >= 4 && spaceHash(x, 17, z) > 0.7) {
+        slot = Math.floor(spaceHash(x, 18, z) * slots)
+        while (used[slot]) slot = (slot + 1) % slots
+        r = spaceHash(x, 19, z)
+        api.setStandardChestItemSlot([x, y, z], slot, r > 0.5 ? "Caught Mob Spirit_Bear Default" : "Caught Mob Spirit_Stag Default", 1)
+    }
+}
+
+function fillStationChest(x, y, z, tier) {
+    fillTierChest(x, y, z, tier ? 2 + Math.floor(spaceHash(x, 5, z) * 3) : 1 + Math.floor(spaceHash(x, 5, z) * 2))
+}
+
+function fillWreckChest(x, y, z, type) {
+    fillTierChest(x, y, z, type)
+}
+
+function placeWreckLoot(spots, tier) {
+    var i, s, chest
+    if (tier > 4) tier = 4
+    if (tier < 0) tier = 0
+    chest = TIER_CHESTS[tier]
+    for (i = 0; i < spots.length; i++) {
+        s = spots[i]
+        if (trySet(s[0], s[1], s[2], chest)) fillTierChest(s[0], s[1], s[2], tier)
+    }
+}
+
+function wreckXZ(alongZ, cx, cz, i, j) {
+    return alongZ ? [cx + j, cz + i] : [cx + i, cz + j]
+}
+
+function placeWreck(cx, cy, cz, type) {
+    var roll = spaceHash(cx, 2, cz)
+    var shape = roll < 0.12 ? 0 : 1 + Math.floor((roll - 0.12) / 0.88 * 7)
+    if (shape > 7) shape = 7
+    var tier = typeof type === "number" ? type : Math.floor(spaceHash(cx, 4, cz) * 5)
+    var alongZ = spaceHash(cx, 3, cz) > 0.5
+    var len, wid, ht, i, j, k, x, y, z, n, p, ripped, missWall, missCeil, missFloor
+    var isFloor, isCeil, isWall, isEnd, inside, b, chests, c, r, dx, dz, d2
+
+    if (tier > 4) tier = 4
+    if (tier < 0) tier = 0
+
+    if (shape === 1) {
+        len = 7 + Math.floor(spaceHash(cx, 5, cz) * 6)
+        wid = 6 + Math.floor(spaceHash(cx, 6, cz) * 5)
+        chests = []
+        for (i = 0; i < len; i++) {
+            for (j = 0; j < wid; j++) {
+                p = wreckXZ(alongZ, cx, cz, i, j)
+                x = p[0]
+                z = p[1]
+                n = spaceHash(x, cy + 3, z)
+                if (n > 0.88) continue
+                trySet(x, cy, z, wreckHullBlock(tier, n))
+                if (n > 0.7) trySet(x, cy + 1, z, spacePick(WRECK_DEBRIS, n))
+            }
+        }
+        c = 2 + Math.floor(spaceHash(cx, 21, cz) * 3)
+        for (i = 0; i < c; i++) {
+            p = wreckXZ(alongZ, cx, cz,
+                1 + Math.floor(spaceHash(cx, 50 + i, cz) * (len - 2)),
+                1 + Math.floor(spaceHash(cx, 60 + i, cz) * (wid - 2)))
+            chests.push([p[0], cy + 1, p[1]])
+        }
+        placeWreckLoot(chests, tier)
+        return
+    }
+
+    if (shape === 2) {
+        len = 10 + Math.floor(spaceHash(cx, 5, cz) * 8)
+        wid = 3 + Math.floor(spaceHash(cx, 6, cz) * 2)
+        for (i = 0; i < len; i++) {
+            for (j = 0; j < wid; j++) {
+                p = wreckXZ(alongZ, cx, cz, i, j)
+                x = p[0]
+                z = p[1]
+                n = spaceHash(x, cy, z)
+                if (n > 0.9) continue
+                trySet(x, cy, z, wreckHullBlock(tier, n))
+                if ((j === 0 || j === wid - 1) && n > 0.35 && n < 0.8) {
+                    trySet(x, cy + 1, z, wreckHullBlock(tier, n))
+                    if (n > 0.55) trySet(x, cy + 2, z, wreckHullBlock(tier, n * 0.9))
+                }
+            }
+        }
+        p = wreckXZ(alongZ, cx, cz, Math.floor(len / 3), Math.floor(wid / 2))
+        chests = [[p[0], cy + 1, p[1]]]
+        p = wreckXZ(alongZ, cx, cz, Math.floor(len * 2 / 3), Math.floor(wid / 2))
+        chests.push([p[0], cy + 1, p[1]])
+        placeWreckLoot(chests, tier)
+        return
+    }
+
+    if (shape === 3) {
+        r = 4 + Math.floor(spaceHash(cx, 5, cz) * 3)
+        for (dx = -r; dx <= r; dx++) {
+            for (dz = -r; dz <= r; dz++) {
+                d2 = dx * dx + dz * dz
+                if (d2 > r * r || d2 < (r - 2) * (r - 2)) continue
+                n = spaceHash(cx + dx, cy, cz + dz)
+                if (n > 0.9) continue
+                trySet(cx + dx, cy, cz + dz, wreckHullBlock(tier, n))
+            }
+        }
+        chests = [[cx + r - 1, cy + 1, cz], [cx - r + 1, cy + 1, cz]]
+        if (spaceHash(cx, 22, cz) > 0.4) chests.push([cx, cy + 1, cz + r - 1])
+        placeWreckLoot(chests, tier)
+        return
+    }
+
+    if (shape === 4) {
+        len = 7 + Math.floor(spaceHash(cx, 5, cz) * 5)
+        wid = 3 + Math.floor(spaceHash(cx, 6, cz) * 2)
+        for (i = 0; i < len; i++) {
+            for (j = 0; j < wid; j++) {
+                p = wreckXZ(alongZ, cx, cz, i, j)
+                n = spaceHash(p[0], cy, p[1])
+                if (n < 0.9) trySet(p[0], cy, p[1], wreckHullBlock(tier, n))
+            }
+        }
+        for (i = 0; i < wid + 2; i++) {
+            for (j = 0; j < len - 2; j++) {
+                x = alongZ ? cx + wid + j : cx + i
+                z = alongZ ? cz + i : cz + wid + j
+                n = spaceHash(x, cy + 1, z)
+                if (n < 0.9) trySet(x, cy, z, wreckHullBlock(tier, n))
+            }
+        }
+        p = wreckXZ(alongZ, cx, cz, 2, 1)
+        chests = [[p[0], cy + 1, p[1]]]
+        chests.push([alongZ ? cx + wid + 1 : cx + 1, cy + 1, alongZ ? cz + 1 : cz + wid + 2])
+        placeWreckLoot(chests, tier)
+        return
+    }
+
+    if (shape === 5) {
+        len = 4
+        wid = 4
+        ht = 4
+        for (i = 0; i < len; i++) {
+            for (j = 0; j < wid; j++) {
+                for (k = 0; k < ht; k++) {
+                    x = cx + i
+                    y = cy + k
+                    z = cz + j
+                    isFloor = k === 0
+                    isCeil = k === ht - 1
+                    isWall = i === 0 || i === len - 1 || j === 0 || j === wid - 1
+                    if (!isFloor && !isCeil && !isWall) continue
+                    n = spaceHash(x, y, z)
+                    if (isWall && k === 1 && i === 0 && n > 0.25) continue
+                    if (n > 0.94) continue
+                    trySet(x, y, z, wreckHullBlock(tier, n))
+                }
+            }
+        }
+        placeWreckLoot([[cx + 1, cy + 1, cz + 1], [cx + 2, cy + 1, cz + 2]], tier)
+        return
+    }
+
+    if (shape === 6) {
+        len = 8 + Math.floor(spaceHash(cx, 5, cz) * 5)
+        wid = 6 + Math.floor(spaceHash(cx, 6, cz) * 4)
+        for (i = 0; i < len; i++) {
+            for (j = 0; j < wid; j++) {
+                if (i % 3 !== 0 && j % 3 !== 0) continue
+                p = wreckXZ(alongZ, cx, cz, i, j)
+                x = p[0]
+                z = p[1]
+                n = spaceHash(x, cy, z)
+                if (n > 0.85) continue
+                trySet(x, cy, z, wreckHullBlock(tier, n))
+                if (i % 3 === 0 && j % 3 === 0 && n > 0.3) {
+                    trySet(x, cy + 1, z, wreckHullBlock(tier, n))
+                    trySet(x, cy + 2, z, wreckHullBlock(tier, n))
+                }
+            }
+        }
+        p = wreckXZ(alongZ, cx, cz, Math.floor(len / 2), Math.floor(wid / 2))
+        placeWreckLoot([[p[0], cy + 1, p[1]]], tier)
+        return
+    }
+
+    if (shape === 7) {
+        c = 2 + Math.floor(spaceHash(cx, 7, cz) * 3)
+        chests = []
+        for (k = 0; k < c; k++) {
+            dx = Math.floor((spaceHash(cx, 30 + k, cz) - 0.5) * 14)
+            dz = Math.floor((spaceHash(cx, 40 + k, cz) - 0.5) * 14)
+            r = 2 + Math.floor(spaceHash(cx, 50 + k, cz) * 2)
+            for (i = -r; i <= r; i++) {
+                for (j = -r; j <= r; j++) {
+                    if (i * i + j * j > r * r) continue
+                    n = spaceHash(cx + dx + i, cy, cz + dz + j)
+                    if (n > 0.86) continue
+                    trySet(cx + dx + i, cy, cz + dz + j, wreckHullBlock(tier, n))
+                }
+            }
+            chests.push([cx + dx, cy + 1, cz + dz])
+        }
+        placeWreckLoot(chests, tier)
+        return
+    }
+
+    len = 5 + Math.floor(spaceHash(cx, 5, cz) * 4)
+    wid = 5 + Math.floor(spaceHash(cx, 6, cz) * 3)
+    ht = 5 + Math.floor(spaceHash(cx, 8, cz) * 3)
+    ripped = spaceHash(cx, 9, cz) > 0.5 ? 0 : wid - 1
+    missWall = spaceHash(cx, 10, cz) > 0.45
+    missCeil = spaceHash(cx, 11, cz) > 0.4
+    missFloor = spaceHash(cx, 12, cz) > 0.75
+    for (i = 0; i < len; i++) {
+        for (j = 0; j < wid; j++) {
+            for (k = 0; k < ht; k++) {
+                p = wreckXZ(alongZ, cx, cz, i, j)
+                x = p[0]
+                y = cy + k
+                z = p[1]
+                isFloor = k === 0
+                isCeil = k === ht - 1
+                isWall = j === 0 || j === wid - 1
+                isEnd = i === 0 || i === len - 1
+                inside = !isFloor && !isCeil && !isWall && !isEnd
+                if (inside) {
+                    if (spaceHash(x, y + 21, z) > 0.88) trySet(x, y, z, spacePick(WRECK_DEBRIS, spaceHash(x, y, z)))
+                    continue
+                }
+                if (isEnd && !isFloor) continue
+                n = spaceHash(x, y + 3, z)
+                if (isFloor && (missFloor || n > 0.9)) continue
+                if (isCeil && (missCeil || n > 0.45)) continue
+                if (isWall && missWall && j === ripped) continue
+                if (isWall && j === ripped && n > 0.22) continue
+                if (isWall && j !== ripped && n > 0.62) continue
+                if (isWall && spaceHash(x, y + 40, z) > 0.82) continue
+                b = wreckHullBlock(tier, n)
+                trySet(x, y, z, b)
+            }
+        }
+    }
+    p = wreckXZ(alongZ, cx, cz, Math.floor(len / 2), Math.floor(wid / 2))
+    placeWreckLoot([[p[0], cy + 1, p[1]]], tier)
+    if (spaceHash(cx, 19, cz) > 0.55) {
+        for (i = 0; i < 3 + Math.floor(spaceHash(cx, 20, cz) * 5); i++) {
+            p = wreckXZ(alongZ, cx, cz,
+                1 + Math.floor(spaceHash(cx, 30 + i, cz) * (len - 2)),
+                1 + Math.floor(spaceHash(cx, 40 + i, cz) * (wid - 2)))
+            trySet(p[0], cy + 1, p[1], spacePick(WRECK_DEBRIS, spaceHash(p[0], cy, p[1])))
+        }
+    }
+}
+
+function placeSkyIsland(ox, oy, oz) {
+    var r = 3 + Math.floor(spaceHash(ox, 2, oz) * 4)
+    var dirtH = 2 + Math.floor(spaceHash(ox, 3, oz) * 2)
+    var stoneH = 4 + Math.floor(spaceHash(ox, 4, oz) * 7)
+    var dx, dz, dy, dist, topY, stonePos, i, n, oreN
+    stonePos = []
+    for (dx = -r; dx <= r; dx++) {
+        for (dz = -r; dz <= r; dz++) {
+            dist = dx * dx + dz * dz
+            if (dist > r * r) continue
+            if (dist > (r - 1) * (r - 1) && spaceHash(ox + dx, 7, oz + dz) > 0.55) continue
+            topY = oy
+            stPut(ox + dx, topY, oz + dz, "Grass Block")
+            for (dy = 1; dy <= dirtH; dy++) stPut(ox + dx, topY - dy, oz + dz, "Dirt")
+            for (dy = 1; dy <= stoneH; dy++) {
+                stPut(ox + dx, topY - dirtH - dy, oz + dz, spaceHash(ox + dx, dy, oz + dz) > 0.7 ? "Messy Stone" : "Stone")
+                stonePos.push([ox + dx, topY - dirtH - dy, oz + dz])
+            }
+        }
+    }
+    if (spaceHash(ox, 55, oz) > 0.42) {
+        stPut(ox, oy + 1, oz, spacePick(ISLAND_SAPLINGS, spaceHash(ox, 56, oz)))
+    }
+    if (spaceHash(ox, 60, oz) > 0.35 && stonePos.length) {
+        oreN = 1 + Math.floor(spaceHash(ox, 61, oz) * 5)
+        for (i = 0; i < oreN; i++) {
+            n = Math.floor(spaceHash(ox, 70 + i, oz) * stonePos.length)
+            stPut(stonePos[n][0], stonePos[n][1], stonePos[n][2], spacePick(ISLAND_ORES, spaceHash(ox, 80 + i, oz)))
+        }
+    }
+    if (spaceHash(ox, 90, oz) > 0.55) {
+        placeSpawner(ox + 1, oy + 1, oz, spacePick(ISLAND_SPAWNERS, spaceHash(ox, 91, oz)))
+    }
+}
+
+function generateAsteroidsAround(px, py, pz, spaceTop) {
+    var ocx = Math.floor(px / AST_CHUNK)
+    var ocz = Math.floor(pz / AST_CHUNK)
+    var yMax = spaceTop
+    var yFloor = SPACE_Y_MIN + 1
+    var bandLo = py - AST_BAND
+    var bandHi = py + AST_BAND
+    if (bandHi > yMax) bandHi = yMax
+    if (bandLo < yFloor) bandLo = yFloor
+    if (bandLo > bandHi) return
+    var ly0 = Math.floor(bandLo / AST_LAYER)
+    var ly1 = Math.floor(bandHi / AST_LAYER)
+    var built = 0
+    for (var cx = ocx - AST_R; cx <= ocx + AST_R; cx++) {
+        for (var cz = ocz - AST_R; cz <= ocz + AST_R; cz++) {
+            for (var ly = ly0; ly <= ly1; ly++) {
+                var key = cx + "_" + ly + "_" + cz
+                if (asteroidDone[key]) continue
+                var h = spaceHash(cx, ly + 50, cz)
+                asteroidDone[key] = true
+                var wx = cx * AST_CHUNK + Math.floor(spaceHash(cx, ly * 3 + 1, cz) * AST_CHUNK)
+                var wz = cz * AST_CHUNK + Math.floor(spaceHash(cx, ly * 3 + 2, cz) * AST_CHUNK)
+                var wy = ly * AST_LAYER + Math.floor(spaceHash(cx, ly, cz) * (AST_LAYER - 8))
+                if (wy > yMax || wy < yFloor) continue
+                if (!api.isBlockInLoadedChunk(wx, wy, wz)) {
+                    asteroidDone[key] = false
+                    continue
+                }
+                if (nearSpacePad(wx, wy, wz)) continue
+                if (h > AST_CHANCE) continue
+                if (spaceHash(cx, ly + 91, cz) * STATION_EVERY < 1) {
+                    placeStation(wx, wy, wz)
+                    markStationChunks(wx, wy, wz)
+                } else if (spaceHash(cx, ly + 88, cz) * WRECK_EVERY < 1) {
+                    placeWreck(wx, wy, wz, Math.floor(spaceHash(cx, ly + 7, cz) * 5))
+                } else if (spaceHash(cx, ly + 85, cz) * ISLAND_EVERY < 1) {
+                    placeSkyIsland(wx, wy, wz)
+                } else {
+                    var roll = spaceHash(cx, ly + 33, cz)
+                    var astPal = roll < 0.09 ? 2 : roll < 0.2 ? 1 : 0
+                    placeAsteroidAt(wx, wy, wz, 2 + Math.floor(spaceHash(cx, ly + 9, cz) * 4), Math.floor(spaceHash(cx, ly + 21, cz) * 7), astPal)
+                }
+                built++
+                if (built >= 4) return
+            }
+        }
+    }
+}
+
+function startMeteorEvent(nearPos) {
+    var ang, dist, dur, ex, ey, ez, tries, ids, i, p
+    if (nearSpacePad(nearPos[0], nearPos[1], nearPos[2])) return false
+    tries = 0
+    do {
+        ang = Math.random() * Math.PI * 2
+        dist = 18 + Math.random() * 50
+        ex = nearPos[0] + Math.cos(ang) * dist
+        ey = nearPos[1] + 10 + Math.random() * 25
+        ez = nearPos[2] + Math.sin(ang) * dist
+        tries++
+    } while (nearSpacePad(ex, ey, ez) && tries < 12)
+    if (nearSpacePad(ex, ey, ez)) return false
+    dur = MET_EVENT_DUR_MIN + Math.floor(Math.random() * (MET_EVENT_DUR_MAX - MET_EVENT_DUR_MIN + 1))
+    meteorEvent = {
+        endAt: spaceTick + dur,
+        x: ex,
+        y: ey,
+        z: ez,
+        nextSpawn: spaceTick
+    }
+    ids = api.getPlayerIds()
+    for (i = 0; i < ids.length; i++) {
+        p = api.getPosition(ids[i])
+        if (!p || !isInSpaceY(p[1])) continue
+        if (spaceDist2(p[0], p[1], p[2], meteorEvent.x, meteorEvent.y, meteorEvent.z) > 120 * 120) continue
+        api.sendFlyingMiddleMessage(ids[i], "METEOR SHOWER", 90, 1600)
+        api.sendMessage(ids[i], "Meteor shower nearby!", { color: "#ff8844" })
+    }
+    return true
+}
+
+function updateMeteorEvent(nearPos) {
+    if (!nearPos) {
+        if (meteorEvent) {
+            meteorEvent = null
+            meteorEventNext = spaceTick + MET_EVENT_CD_MIN
+        }
+        return
+    }
+    if (!meteorEvent) {
+        if (spaceTick >= meteorEventNext) {
+            if (!startMeteorEvent(nearPos)) {
+                meteorEventNext = spaceTick + 40
+            }
+        }
+        return
+    }
+    if (spaceTick >= meteorEvent.endAt) {
+        meteorEvent = null
+        meteorEventNext = spaceTick + MET_EVENT_CD_MIN + Math.floor(Math.random() * (MET_EVENT_CD_MAX - MET_EVENT_CD_MIN + 1))
+        return
+    }
+    if (spaceTick >= meteorEvent.nextSpawn) {
+        spawnMeteorNear([meteorEvent.x, meteorEvent.y, meteorEvent.z])
+        meteorEvent.nextSpawn = spaceTick + MET_EVENT_GAP_MIN + Math.floor(Math.random() * (MET_EVENT_GAP_MAX - MET_EVENT_GAP_MIN + 1))
+    }
+}
+
+function spawnMeteorNear(pos) {
+    if (meteors.length >= MAX_MET) return
+    var ang = Math.random() * Math.PI * 2
+    var dist = 12 + Math.random() * 18
+    var x = pos[0] + Math.cos(ang) * dist
+    var y = pos[1] + 18 + Math.random() * 10
+    var z = pos[2] + Math.sin(ang) * dist
+    if (nearSpacePad(x, y, z) || nearSpacePad(pos[0], pos[1], pos[2])) return
+    var block = spacePick(MET_BLOCKS, Math.random())
+    var s = 0.7 + Math.random() * 1.1
+    var shape = Math.floor(Math.random() * 6)
+    var dims
+    if (shape === 0) dims = [s, s, s]
+    else if (shape === 1) dims = [s * 2.7, s * 0.42, s * 0.42]
+    else if (shape === 2) dims = [s * 2.2, s * 0.3, s * 2.2]
+    else if (shape === 3) dims = [s * 0.48, s * 2.8, s * 0.48]
+    else if (shape === 4) dims = [s * 1.9, s * 0.85, s * 0.5]
+    else dims = [s * (0.7 + Math.random() * 0.8), s * (0.7 + Math.random() * 0.8), s * (0.7 + Math.random() * 0.8)]
+    var eId
+    if (shape === 5) {
+        eId = api.attemptCreateMeshEntity("Box", {
+            width: dims[0],
+            height: dims[1],
+            depth: dims[2],
+            texture: block,
+            hideDist: 80,
+            autoRotate: true
+        }, "")
+    } else {
+        eId = api.attemptCreateMeshEntity("BloxdBlock", {
+            blockName: block,
+            size: dims,
+            hideDist: 80,
+            autoRotate: true
+        }, "")
+    }
+    if (!eId) return
+    api.setPosition(eId, x, y, z)
+    meteors.push({
+        eId: eId,
+        vx: (Math.random() - 0.5) * 0.35,
+        vy: -0.55 - Math.random() * 0.45,
+        vz: (Math.random() - 0.5) * 0.35,
+        size: Math.max(dims[0], dims[1], dims[2]),
+        block: block,
+        life: 200
+    })
+}
+
+function spawnFloatingDebris(pos, spaceY) {
+    if (floatingDebris.length >= MAX_DEB) return
+    var x = pos[0] + (Math.random() - 0.5) * 40
+    var y = spaceY + 6 + Math.random() * 28
+    var z = pos[2] + (Math.random() - 0.5) * 40
+    var block = spacePick(DEB_BLOCKS, Math.random())
+    var size = 0.35 + Math.random() * 0.7
+    var eId = api.attemptCreateMeshEntity("BloxdBlock", {
+        blockName: block,
+        size: size,
+        hideDist: 64,
+        autoRotate: true
+    }, "")
+    if (!eId) return
+    api.setPosition(eId, x, y, z)
+    floatingDebris.push({
+        eId: eId,
+        x: x,
+        y: y,
+        z: z,
+        vx: (Math.random() - 0.5) * 0.04,
+        vy: (Math.random() - 0.5) * 0.02,
+        vz: (Math.random() - 0.5) * 0.04,
+        life: 400 + Math.floor(Math.random() * 200)
+    })
+}
+
+function meteorImpact(meteor, x, y, z) {
+    playSpaceParticles(x, y, z, 28, 0.55, 255, 80, 20, 0.7)
+    api.broadcastSound("explode", 1, 0.85, {
+        playerIdOrPos: [x, y, z],
+        maxHearDist: 48,
+        refDistance: 8
+    })
+    var ids = api.getPlayerIds()
+    for (var i = 0; i < ids.length; i++) {
+        var p = api.getPosition(ids[i])
+        if (!p) continue
+        var d2 = spaceDist2(p[0], p[1], p[2], x, y, z)
+        if (d2 < 16) api.applyHealthChange(ids[i], -18, undefined, true)
+        else if (d2 < 36) api.applyHealthChange(ids[i], -8, undefined, true)
+    }
+    var radius = 1 + Math.floor(meteor.size)
+    for (var dx = -radius; dx <= radius; dx++) {
+        for (var dy = -1; dy <= 1; dy++) {
+            for (var dz = -radius; dz <= radius; dz++) {
+                if (dx * dx + dy * dy + dz * dz > radius * radius) continue
+                var bx = Math.floor(x) + dx
+                var by = Math.floor(y) + dy
+                var bz = Math.floor(z) + dz
+                if (!api.isBlockInLoadedChunk(bx, by, bz)) continue
+                if (api.getBlock(bx, by, bz) !== "Air") continue
+                if (Math.random() > 0.55) continue
+                api.setBlock(bx, by, bz, Math.random() > 0.7 ? "Magma" : meteor.block)
+            }
+        }
+    }
+    api.deleteMeshEntity(meteor.eId)
+}
+
+function removeMeteorById(eId) {
+    for (var i = meteors.length - 1; i >= 0; i--) {
+        if (meteors[i].eId === eId) {
+            api.deleteMeshEntity(eId)
+            meteors.splice(i, 1)
+            return true
+        }
+    }
+    return false
+}
+
+function updateMeteors() {
+    for (var i = meteors.length - 1; i >= 0; i--) {
+        var m = meteors[i]
+        m.life--
+        var pos = api.getPosition(m.eId)
+        if (!pos || m.life <= 0) {
+            api.deleteMeshEntity(m.eId)
+            meteors.splice(i, 1)
+            continue
+        }
+        var nx = pos[0] + m.vx
+        var ny = pos[1] + m.vy
+        var nz = pos[2] + m.vz
+        var checkY = Math.floor(ny - m.size * 0.5)
+        if (api.isBlockInLoadedChunk(nx, checkY, nz) && api.getBlockSolidity(Math.floor(nx), checkY, Math.floor(nz))) {
+            meteorImpact(m, nx, ny, nz)
+            meteors.splice(i, 1)
+            continue
+        }
+        api.setPosition(m.eId, nx, ny, nz)
+        if (spaceTick % 3 === 0) playSpaceParticles(nx, ny + 0.4, nz, 6, 0.22, 255, 120, 30, 0.35)
+    }
+}
+
+function updateFloatingDebris() {
+    for (var i = floatingDebris.length - 1; i >= 0; i--) {
+        var d = floatingDebris[i]
+        d.life--
+        if (d.life <= 0) {
+            api.deleteMeshEntity(d.eId)
+            floatingDebris.splice(i, 1)
+            continue
+        }
+        d.x += d.vx
+        d.y += d.vy
+        d.z += d.vz
+        api.setPosition(d.eId, d.x, d.y, d.z)
+    }
+}
+
+function tick(ms) {
+    spaceTick++
+    var ids = api.getPlayerIds()
+    var spacePos = null
+    var spaceYRef = 0
+    for (var i = 0; i < ids.length; i++) {
+        var id = ids[i]
+        var pos = api.getPosition(id)
+        if (!pos) continue
+        var floorY = spaceFloorY(pos[0], pos[2])
+        var inSpace = isInSpaceY(pos[1])
+        if (inSpace !== !!spacePlayers[id]) {
+            spacePlayers[id] = inSpace
+            applySpaceLook(id, inSpace)
+            if (inSpace) {
+                api.sendFlyingMiddleMessage(id, "SPACE", 90, 1400)
+                api.sendMessage(id, "Space biome: y>=" + SPACE_Y_MIN + " and y<=" + SPACE_Y, { color: "#9ad0ff" })
+            } else {
+                api.sendMessage(id, "Left space.", { color: "#a0a0a0" })
+            }
+        }
+        if (pendingKit[id]) {
+            pendingKit[id]--
+            if (pendingKit[id] <= 0) {
+                delete pendingKit[id]
+                giveKitStart(id)
+            }
+        }
+        if (inSpace) {
+            spacePos = pos
+            spaceYRef = floorY
+            if (spaceTick % 6 === 0) generateAsteroidsAround(pos[0], pos[1], pos[2], floorY)
+            if (spaceTick % 8 === 0) ensureSpaceBedrockFloor(pos[0], pos[2])
+        }
+    }
+    if (spacePos) {
+        updateMeteorEvent(spacePos)
+        if (spaceTick % 25 === 0 && Math.random() < 0.55) spawnFloatingDebris(spacePos, spaceYRef)
+    } else {
+        updateMeteorEvent(null)
+        if (spaceTick % 40 === 0) {
+            while (meteors.length) api.deleteMeshEntity(meteors.pop().eId)
+            while (floatingDebris.length) api.deleteMeshEntity(floatingDebris.pop().eId)
+        }
+    }
+    updateMeteors()
+    updateFloatingDebris()
+}
+
+function playerKitKey(playerId) {
+    var db
+    try { db = api.getPlayerDbId(playerId) } catch (e) { db = null }
+    if (db) return "k2_" + db
+    return "k2_" + playerId
+}
+
+function giveKitStart(playerId) {
+    var key, gotPick, gotSap
+    key = playerKitKey(playerId)
+    if (kitDone[key]) return
+    try {
+        if (api.getInventoryItemAmount(playerId, "Wood Pickaxe") > 0) {
+            kitDone[key] = 1
+            return
+        }
+    } catch (e0) {}
+    try { api.giveItem(playerId, "Wood Pickaxe", 1) } catch (e1) {}
+    try { api.giveItem(playerId, "Maple Sapling", 1) } catch (e2) {}
+    gotPick = 0
+    try { gotPick = api.getInventoryItemAmount(playerId, "Wood Pickaxe") } catch (e3) { gotPick = 0 }
+    if (gotPick > 0) {
+        kitDone[key] = 1
+        api.sendMessage(playerId, "Starter kit: Wood Pickaxe + Maple Sapling", { color: "#9ad0ff" })
+    } else {
+        /* retry next join / later ticks */
+        pendingKit[playerId] = 20
+    }
+}
+
+function onPlayerJoin(playerId) {
+    setupWeaponCrafts(playerId)
+    setVisionHelmetRecipes(playerId)
+    updateVisionHelmet(playerId)
+    sendToSpaceSpawn(playerId)
+    /* delay kit a few ticks - inventory not ready on same frame as join */
+    pendingKit[playerId] = 8
+    api.sendMessage(playerId, "Guns + vision helmets: Artisan Bench. Ammo: Workbench.", { color: "#9ad0ff" })
+}
+
+function onPlayerLeave(playerId) {
+    delete pendingKit[playerId]
+    delete reloadPending[playerId]
+    delete activeHelmetEffects[playerId]
+    delete spacePlayers[playerId]
+}
+
+function onRespawnRequest(playerId) {
+    spacePlayers[playerId] = true
+    applySpaceLook(playerId, true)
+    return spaceSpawnPos()
+}
+
+function onInventoryUpdated(playerId) {
+    updateVisionHelmet(playerId)
+}
+
+function onPlayerStartChargingItem(playerId, itemName) {
+    var item, mag, shots, slot
+    if (!isGun(itemName)) return
+    item = api.getHeldItem(playerId)
+    mag = gunMag(itemName)
+    shots = gunShots(item, mag)
+    if (shots >= mag) return "preventCharge"
+    if (api.getInventoryItemAmount(playerId, "Ammo") < 1) {
+        api.sendMessage(playerId, "No Ammo", { color: "#ff8888" })
+        return "preventCharge"
+    }
+    slot = api.getSelectedInventorySlotI(playerId)
+    reloadPending[playerId] = { slot: slot, name: itemName, mag: mag }
+    api.initiateMiddleScreenBar(playerId, gunReloadMs(itemName), true)
+}
+
+function onPlayerFinishChargingItem(playerId, used, itemName) {
+    var p, item, att, need, take, shots
+    p = reloadPending[playerId]
+    delete reloadPending[playerId]
+    if (!used || !p || !isGun(itemName)) return
+    item = api.getItemSlot(playerId, p.slot)
+    if (!item || item.name !== itemName) return
+    shots = gunShots(item, p.mag)
+    need = p.mag - shots
+    if (need <= 0) return
+    if (api.getInventoryItemAmount(playerId, "Ammo") < 1) return
+    take = need
+    if (take > api.getInventoryItemAmount(playerId, "Ammo")) take = api.getInventoryItemAmount(playerId, "Ammo")
+    api.removeItemName(playerId, "Ammo", take)
+    att = item.attributes || {}
+    att.shotsLeft = shots + take
+    if (att.shotsLeft > p.mag) att.shotsLeft = p.mag
+    api.setItemSlot(playerId, p.slot, item.name, 1, att)
+    api.broadcastSound("pickUp", 0.4, 0.7, { playerIdOrPos: playerId })
+}
+
+function onPlayerCraft(playerId, itemName) {
+    tagCraftedVisionHelmet(playerId, itemName)
+}
+
+function onEntityCollision(eId, otherEId) {
+    var meteor = null
+    for (var i = 0; i < meteors.length; i++) {
+        if (meteors[i].eId === eId || meteors[i].eId === otherEId) {
+            meteor = meteors[i]
+            break
+        }
+    }
+    if (!meteor) return
+    var pos = api.getPosition(meteor.eId)
+    if (!pos) return
+    meteorImpact(meteor, pos[0], pos[1], pos[2])
+    for (var i = meteors.length - 1; i >= 0; i--) {
+        if (meteors[i].eId === meteor.eId) meteors.splice(i, 1)
+    }
+}
+
+function onPlayerBreakMeshEntity(playerId, entityId) {
+    if (removeMeteorById(entityId)) return
+    for (var i = floatingDebris.length - 1; i >= 0; i--) {
+        if (floatingDebris[i].eId === entityId) {
+            api.deleteMeshEntity(entityId)
+            floatingDebris.splice(i, 1)
+            return
+        }
+    }
+}
+
+function onPlayerDamagingOtherPlayer(attackingPlayer, damagedPlayer, damageDealt, withItem) {
+    if (playerInSpawnProtect(attackingPlayer) || playerInSpawnProtect(damagedPlayer)) return "preventDamage"
+}
+
+function onPlayerDamagingMob(playerId, mobId, damageDealt, withItem) {
+    if (playerInSpawnProtect(playerId)) return "preventDamage"
+}
+
+function onMobDamagingPlayer(mobId, playerId, damageDealt) {
+    if (playerInSpawnProtect(playerId)) return "preventDamage"
+}
+
+function onPlayerChangeBlock(playerId, x, y, z, fromBlock, toBlock) {
+    if (inSpawnProtect(x, y, z)) return "preventChange"
+}
+
+function onWorldChangeBlock(x, y, z, fromBlock, toBlock, byPlayerId) {
+    if (byPlayerId && inSpawnProtect(x, y, z)) return "preventChange"
+}
+
+function onClose() {
+    while (meteors.length) api.deleteMeshEntity(meteors.pop().eId)
+    while (floatingDebris.length) api.deleteMeshEntity(floatingDebris.pop().eId)
+}

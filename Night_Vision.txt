@@ -1,0 +1,171 @@
+const VISION_HELMETS = {
+  "Red Wood Helmet": {
+    displayName: "Thermal Imager",
+    description:
+      "Grants X-Ray Vision while equipped.",
+    effect: "X-Ray Vision",
+    marker: "xrayHelmet",
+    recipe: {
+      diamonds: 3,
+      gold: 2,
+      iron: 4,
+    },
+  },
+
+  "Blue Wood Helmet": {
+    displayName: "Night Vision Helmet",
+    description:
+      "Grants Night Vision while equipped.",
+    effect: "Night Vision",
+    marker: "nightVisionHelmet",
+    recipe: {
+      diamonds: 3,
+      gold: 4,
+      iron: 8,
+    },
+  },
+};
+
+const activeHelmetEffects = {};
+
+function setVisionHelmetRecipes(playerId) {
+  const itemNames = Object.keys(VISION_HELMETS);
+
+  for (let i = 0; i < itemNames.length; i++) {
+    const itemName = itemNames[i];
+    const config = VISION_HELMETS[itemName];
+
+    api.editItemCraftingRecipes(
+      playerId,
+      itemName,
+      [{
+        requires: [
+          {
+            items: ["Diamond"],
+            amt: config.recipe.diamonds,
+          },
+          {
+            items: ["Gold Bar"],
+            amt: config.recipe.gold,
+          },
+          {
+            items: ["Iron Bar"],
+            amt: config.recipe.iron,
+          },
+        ],
+
+        produces: 1,
+
+        attributes: {
+          customDisplayName: config.displayName,
+          customDescription: config.description,
+
+          customAttributes: {
+            visionHelmet: config.marker,
+          },
+        },
+      }]
+    );
+  }
+}
+
+function getEquippedVisionEffect(playerId) {
+  let helmet;
+
+  try {
+    // 46 — слот шолома
+    helmet = api.getItemSlot(playerId, 46);
+  } catch (error) {
+    return null;
+  }
+
+  if (
+    !helmet ||
+    !helmet.attributes
+  ) {
+    return null;
+  }
+
+  const config = VISION_HELMETS[helmet.name];
+
+  if (!config) {
+    return null;
+  }
+
+  const attributes = helmet.attributes;
+  const customAttributes =
+    attributes.customAttributes || {};
+
+  const validMarker =
+    customAttributes.visionHelmet ===
+    config.marker;
+
+  const validName =
+    attributes.customDisplayName ===
+    config.displayName;
+
+  if (!validMarker && !validName) {
+    return null;
+  }
+
+  return config.effect;
+}
+
+function updateVisionHelmet(playerId) {
+  const requiredEffect =
+    getEquippedVisionEffect(playerId);
+
+  const currentEffect =
+    activeHelmetEffects[playerId] || null;
+
+  if (currentEffect === requiredEffect) {
+    return;
+  }
+
+  if (currentEffect) {
+    try {
+      api.removeEffect(
+        playerId,
+        currentEffect
+      );
+    } catch (error) {}
+  }
+
+  delete activeHelmetEffects[playerId];
+
+  if (requiredEffect) {
+    try {
+      // null — нескінченна тривалість
+      api.applyEffect(
+        playerId,
+        requiredEffect,
+        null,
+        {}
+      );
+
+      activeHelmetEffects[playerId] =
+        requiredEffect;
+    } catch (error) {}
+  }
+}
+
+onPlayerJoin = (playerId) => {
+  setVisionHelmetRecipes(playerId);
+  updateVisionHelmet(playerId);
+};
+
+onInventoryUpdated = (playerId) => {
+  updateVisionHelmet(playerId);
+};
+
+onPlayerLeave = (playerId) => {
+  delete activeHelmetEffects[playerId];
+};
+
+// Застосовує рецепти без перезаходу
+const onlinePlayers = api.getPlayerIds();
+
+for (let i = 0; i < onlinePlayers.length; i++) {
+  setVisionHelmetRecipes(onlinePlayers[i]);
+  updateVisionHelmet(onlinePlayers[i]);
+}

@@ -1,0 +1,174 @@
+const fs = require("fs");
+const path = require("path");
+
+const spacePath = path.join("d:", "O_block_ io_code", "bloxd-space-biome.js");
+const milPath = path.join("d:", "O_block_ io_code", "Military mod.js");
+const outPath = path.join("d:", "O_block_ io_code", "_space_military_.js");
+const histRoot = path.join(process.env.APPDATA || "", "Cursor", "User", "History");
+
+function findHistoryBackup() {
+    if (!fs.existsSync(histRoot)) return null;
+    let best = null;
+    function walk(dir) {
+        for (const name of fs.readdirSync(dir)) {
+            const p = path.join(dir, name);
+            const st = fs.statSync(p);
+            if (st.isDirectory()) walk(p);
+            else if (name === "entries.json") {
+                const raw = fs.readFileSync(p, "utf8");
+                if (!/space_military|_space_military_/i.test(raw)) continue;
+                let entries;
+                try {
+                    entries = JSON.parse(raw);
+                } catch (e) {
+                    continue;
+                }
+                const folder = path.dirname(p);
+                for (const ent of entries) {
+                    const src = ent.source || "";
+                    if (!/_space_military_\.js/i.test(src) && !/space_military/i.test(src)) continue;
+                    const fp = path.join(folder, ent.id || "");
+                    if (!fs.existsSync(fp)) continue;
+                    const mtime = ent.timestamp || st.mtimeMs;
+                    if (!best || mtime > best.mtime) best = { path: fp, mtime };
+                }
+            }
+        }
+    }
+    walk(histRoot);
+    return best;
+}
+
+const dropFn = new Set([
+    "getHeldShuttle", "shuttleItemAttrs", "itemIsShuttle", "sanitizeShuttleStacks",
+    "attachCarMesh", "detachCarMesh", "clearVehicleSeat", "enterFlyCar", "vehicleFlyTick",
+    "setupShuttleCrafts", "tagCraftedShuttle", "onPlayerAttemptAltAction",
+    "onPlayerDamagingOtherPlayer", "onMobDamagingPlayer", "onAttemptKillPlayer"
+]);
+
+function stripShuttleFromSpace(text) {
+    let lines = text.split(/\r?\n/);
+    const out = [];
+    let skippingFn = false;
+    let fnDepth = 0;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^\/\* F8 World Code/.test(line)) {
+            out.push("/* F8 World Code — space biome + military (no shuttles). 16000 char limit. */");
+            continue;
+        }
+        if (/^vehicleSeated\s*=/.test(line.trim())) continue;
+        if (/Scout=Bucket.*Dome=Empty Bottle/.test(line)) continue;
+        if (/^SHUTTLE_LIST\s*=/.test(line.trim())) {
+            while (i + 1 < lines.length && !/^\]/.test(lines[i + 1].trim())) i++;
+            continue;
+        }
+        const fnMatch = line.match(/^function\s+(\w+)\s*\(/);
+        if (fnMatch && dropFn.has(fnMatch[1])) {
+            skippingFn = true;
+            fnDepth = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+            if (fnDepth <= 0) fnDepth = 1;
+            continue;
+        }
+        if (skippingFn) {
+            const opens = (line.match(/\{/g) || []).length;
+            const closes = (line.match(/\}/g) || []).length;
+            fnDepth += opens - closes;
+            if (fnDepth <= 0 && opens + closes > 0) skippingFn = false;
+            continue;
+        }
+        out.push(line);
+    }
+    text = out.join("\n");
+    text = text.replace(/\n\s*if \(vehicleSeated\[[^\n]+\n[^\n]*continue\n/g, "\n");
+    text = text.replace(/\n\s*if \(vehicleSeated\[id\]\) \{[\s\S]*?\n\s*\}\n/g, "\n");
+    text = text.replace(/\n\s*vehicleFlyTick\(id\)\n/g, "\n");
+    text = text.replace(/\n\s*if \(cmd === "flycar"[\s\S]*?return true\n\s*\}\n/g, "\n");
+    text = text.replace(/\n\s*if \(cmd === "land"[\s\S]*?return true\n\s*\}\n/g, "\n");
+    return text;
+}
+
+function extractMilitaryCore(milText) {
+    const lines = milText.split(/\r?\n/);
+    const start = lines.findIndex((l) => /^reloadPending\s*=/.test(l.trim()));
+    const end = lines.findIndex((l) => /^function onPlayerJoin\s*\(/.test(l.trim()));
+    return lines.slice(start, end).join("\n");
+}
+
+function extractMilitaryHandlers(milText) {
+    const lines = milText.split(/\r?\n/);
+    const start = lines.findIndex((l) => /^function onInventoryUpdated\s*\(/.test(l.trim()));
+    return lines.slice(start).join("\n");
+}
+
+function mergeHandlers(spaceText, milHandlers) {
+    const joinBlock = `function onPlayerJoin(playerId) {
+    spacePlayers[playerId] = false
+    applySpaceLook(playerId, false)
+    setupWeaponCrafts(playerId)
+    setVisionHelmetRecipes(playerId)
+    updateVisionHelmet(playerId)
+    api.sendMessage(playerId, "Guns: Artisan Bench. Ammo: Workbench.", { color: "#9ad0ff" })
+}`;
+
+    const leaveBlock = `function onPlayerLeave(playerId) {
+    delete reloadPending[playerId]
+    delete activeHelmetEffects[playerId]
+    delete spacePlayers[playerId]
+}`;
+
+    const craftBlock = `function onPlayerCraft(playerId, itemName) {
+    tagCraftedVisionHelmet(playerId, itemName)
+}`;
+
+    spaceText = spaceText.replace(/function onPlayerJoin\(playerId\) \{[\s\S]*?\n\}/, joinBlock);
+    spaceText = spaceText.replace(/function onPlayerLeave\(playerId\) \{[\s\S]*?\n\}/, leaveBlock);
+    spaceText = spaceText.replace(/function onPlayerCraft\(playerId, itemName\) \{[\s\S]*?\n\}/, craftBlock);
+
+    if (!/function onInventoryUpdated/.test(spaceText)) {
+        spaceText = spaceText.replace(
+            /function onPlayerCraft\(playerId, itemName\)/,
+            milHandlers.trim() + "\n\nfunction onPlayerCraft(playerId, itemName)"
+        );
+    }
+    return spaceText;
+}
+
+function build() {
+    const hist = findHistoryBackup();
+    let mode;
+    let content;
+    if (hist) {
+        content = stripShuttleFromSpace(fs.readFileSync(hist.path, "utf8"));
+        const milCore = extractMilitaryCore(fs.readFileSync(milPath, "utf8"));
+        const milHandlers = extractMilitaryHandlers(fs.readFileSync(milPath, "utf8"));
+        const idx = content.indexOf("function spaceHash");
+        content = content.slice(0, idx) + "\n" + milCore + "\n\n" + content.slice(idx);
+        content = mergeHandlers(content, milHandlers);
+        mode = "history:" + hist.path;
+    } else {
+        let spaceText = stripShuttleFromSpace(fs.readFileSync(spacePath, "utf8"));
+        const milCore = extractMilitaryCore(fs.readFileSync(milPath, "utf8"));
+        const milHandlers = extractMilitaryHandlers(fs.readFileSync(milPath, "utf8"));
+        const idx = spaceText.indexOf("function spaceHash");
+        content = spaceText.slice(0, idx) + "\n" + milCore + "\n\n" + spaceText.slice(idx);
+        content = mergeHandlers(content, milHandlers);
+        mode = "reconstructed";
+    }
+
+    if (!/VISION_HELMETS/.test(content)) throw new Error("missing VISION_HELMETS");
+    if (!/Sanguine Helmet/.test(content)) throw new Error("missing Sanguine");
+    if (!/Spectral Helmet/.test(content)) throw new Error("missing Spectral");
+    if (/SHUTTLE_LIST|vehicleSeated|enterFlyCar/.test(content)) throw new Error("shuttle code remains");
+
+    fs.writeFileSync(outPath, content, "utf8");
+    const stat = fs.statSync(outPath);
+    return { mode, outPath, lines: content.split(/\n/).length, chars: stat.size };
+}
+
+try {
+    console.log(JSON.stringify(build(), null, 2));
+} catch (e) {
+    console.error(e.message || e);
+    process.exit(1);
+}
