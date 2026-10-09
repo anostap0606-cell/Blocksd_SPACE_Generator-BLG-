@@ -1,0 +1,203 @@
+/* F8 World Code — Military mod. Guns, ammo, reload, thermal + night vision. */
+
+reloadPending = {}
+activeHelmetEffects = {}
+WEAPON_STATION = "Artisan Bench"
+/* gun, iron, gold, diamond, coal, moon */
+WEAPON_CRAFTS = [
+    ["M1911|RequiresAmmo", 8, 0, 0, 4, 0], ["Block-19|RequiresAmmo", 10, 2, 0, 4, 0], ["Deagle|RequiresAmmo", 12, 4, 0, 4, 0],
+    ["Mini Izu|RequiresAmmo", 10, 3, 0, 6, 0], ["MP40|RequiresAmmo", 14, 3, 0, 8, 0], ["Double Barrel|RequiresAmmo", 12, 2, 0, 6, 0],
+    ["FMR|RequiresAmmo", 16, 4, 1, 8, 0], ["AK-47|RequiresAmmo", 18, 5, 1, 8, 0], ["M16|RequiresAmmo", 18, 5, 1, 8, 0],
+    ["TAR-21|RequiresAmmo", 16, 4, 2, 6, 0], ["SKAR|RequiresAmmo", 16, 4, 2, 6, 0], ["Striker-12|RequiresAmmo", 14, 5, 0, 8, 0],
+    ["DMR|RequiresAmmo", 20, 6, 3, 10, 0], ["VSR|RequiresAmmo", 22, 8, 4, 10, 0], ["AWP|RequiresAmmo", 25, 10, 5, 12, 0],
+    ["GPMG|RequiresAmmo", 28, 8, 2, 10, 2], ["Minigun|RequiresAmmo", 32, 10, 3, 12, 4]
+]
+VISION_HELMETS = {
+    "Sanguine Helmet": {
+        displayName: "Sanguine Helmet",
+        description: "Thermal imager. Grants X-Ray Vision while equipped.",
+        effect: "X-Ray Vision",
+        marker: "xrayHelmet",
+        recipe: { diamonds: 3, gold: 2, iron: 4 }
+    },
+    "Spectral Helmet": {
+        displayName: "Spectral Helmet",
+        description: "Night vision. Grants Night Vision while equipped.",
+        effect: "Night Vision",
+        marker: "nightVisionHelmet",
+        recipe: { diamonds: 3, gold: 4, iron: 8 }
+    }
+}
+
+function setupWeaponCrafts(playerId) {
+    var i, w, req
+    api.editItemCraftingRecipes(playerId, "Ammo", [{
+        requires: [{ items: ["Iron Bar"], amt: 1 }],
+        produces: 4,
+        station: "Workbench"
+    }])
+    for (i = 0; i < WEAPON_CRAFTS.length; i++) {
+        w = WEAPON_CRAFTS[i]
+        req = []
+        if (w[1]) req.push({ items: ["Iron Bar"], amt: w[1] })
+        if (w[2]) req.push({ items: ["Gold Bar"], amt: w[2] })
+        if (w[3]) req.push({ items: ["Diamond"], amt: w[3] })
+        if (w[4]) req.push({ items: ["Coal"], amt: w[4] })
+        if (w[5]) req.push({ items: ["Moonstone"], amt: w[5] })
+        api.editItemCraftingRecipes(playerId, w[0], [{ requires: req, produces: 1, station: WEAPON_STATION }])
+    }
+}
+
+function setVisionHelmetRecipes(playerId) {
+    var itemNames = Object.keys(VISION_HELMETS)
+    var i, itemName, config
+    for (i = 0; i < itemNames.length; i++) {
+        itemName = itemNames[i]
+        config = VISION_HELMETS[itemName]
+        api.editItemCraftingRecipes(playerId, itemName, [{
+            requires: [
+                { items: ["Diamond"], amt: config.recipe.diamonds },
+                { items: ["Gold Bar"], amt: config.recipe.gold },
+                { items: ["Iron Bar"], amt: config.recipe.iron }
+            ],
+            produces: 1,
+            station: "Workbench",
+            attributes: {
+                customDisplayName: config.displayName,
+                customDescription: config.description,
+                customAttributes: { visionHelmet: config.marker }
+            }
+        }])
+    }
+}
+
+function getEquippedVisionEffect(playerId) {
+    var helmet, config
+    try {
+        helmet = api.getItemSlot(playerId, 46)
+    } catch (error) {
+        return null
+    }
+    if (!helmet) return null
+    config = VISION_HELMETS[helmet.name]
+    if (!config) return null
+    return config.effect
+}
+
+function updateVisionHelmet(playerId) {
+    var requiredEffect = getEquippedVisionEffect(playerId)
+    var currentEffect = activeHelmetEffects[playerId] || null
+    if (currentEffect === requiredEffect) return
+    if (currentEffect) {
+        try { api.removeEffect(playerId, currentEffect) } catch (error) {}
+    }
+    delete activeHelmetEffects[playerId]
+    if (requiredEffect) {
+        try {
+            api.applyEffect(playerId, requiredEffect, null, {})
+            activeHelmetEffects[playerId] = requiredEffect
+        } catch (error) {}
+    }
+}
+
+function tagCraftedVisionHelmet(playerId, itemName) {
+    var config = VISION_HELMETS[itemName]
+    var i, item, att, ca
+    if (!config) return
+    for (i = 0; i < 50; i++) {
+        item = api.getItemSlot(playerId, i)
+        if (!item || item.name !== itemName) continue
+        att = item.attributes || {}
+        ca = att.customAttributes || {}
+        if (att.customDisplayName === config.displayName) continue
+        if (ca.visionHelmet === config.marker) continue
+        api.setItemSlot(playerId, i, itemName, item.amount || 1, {
+            customDisplayName: config.displayName,
+            customDescription: config.description,
+            customAttributes: { visionHelmet: config.marker }
+        })
+        return
+    }
+}
+
+function isGun(name) {
+    return name && name.indexOf("|RequiresAmmo") >= 0
+}
+
+function gunMag(name) {
+    if (name.indexOf("Double Barrel") >= 0) return 2
+    if (name.indexOf("AWP") >= 0 || name.indexOf("VSR") >= 0 || name.indexOf("DMR") >= 0) return 5
+    if (name.indexOf("Minigun") >= 0) return 100
+    if (name.indexOf("GPMG") >= 0) return 60
+    if (name.indexOf("Striker") >= 0) return 8
+    if (name.indexOf("Deagle") >= 0 || name.indexOf("M1911") >= 0 || name.indexOf("Block-19") >= 0 || name.indexOf("Mini Izu") >= 0) return 12
+    return 30
+}
+
+function gunReloadMs(name) {
+    if (name.indexOf("AWP") >= 0 || name.indexOf("VSR") >= 0) return 2800
+    if (name.indexOf("Minigun") >= 0 || name.indexOf("GPMG") >= 0) return 3500
+    if (name.indexOf("Double Barrel") >= 0 || name.indexOf("Striker") >= 0) return 2200
+    return 1800
+}
+
+function gunShots(item, mag) {
+    if (!item || !item.attributes || item.attributes.shotsLeft === undefined) return mag
+    return item.attributes.shotsLeft
+}
+
+function onPlayerJoin(playerId) {
+    setupWeaponCrafts(playerId)
+    setVisionHelmetRecipes(playerId)
+    updateVisionHelmet(playerId)
+}
+
+function onPlayerLeave(playerId) {
+    delete reloadPending[playerId]
+    delete activeHelmetEffects[playerId]
+}
+
+function onInventoryUpdated(playerId) {
+    updateVisionHelmet(playerId)
+}
+
+function onPlayerCraft(playerId, itemName) {
+    tagCraftedVisionHelmet(playerId, itemName)
+}
+
+function onPlayerStartChargingItem(playerId, itemName) {
+    var item, mag, shots, slot
+    if (!isGun(itemName)) return
+    item = api.getHeldItem(playerId)
+    mag = gunMag(itemName)
+    shots = gunShots(item, mag)
+    if (shots >= mag) return "preventCharge"
+    if (api.getInventoryItemAmount(playerId, "Ammo") < 1) {
+        api.sendMessage(playerId, "No Ammo", { color: "#ff8888" })
+        return "preventCharge"
+    }
+    slot = api.getSelectedInventorySlotI(playerId)
+    reloadPending[playerId] = { slot: slot, name: itemName, mag: mag }
+    api.initiateMiddleScreenBar(playerId, gunReloadMs(itemName), true)
+}
+
+function onPlayerFinishChargingItem(playerId, used, itemName) {
+    var p, item, att, need, take, shots
+    p = reloadPending[playerId]
+    delete reloadPending[playerId]
+    if (!used || !p || !isGun(itemName)) return
+    item = api.getItemSlot(playerId, p.slot)
+    if (!item || item.name !== itemName) return
+    shots = gunShots(item, p.mag)
+    need = p.mag - shots
+    if (need <= 0) return
+    if (api.getInventoryItemAmount(playerId, "Ammo") < 1) return
+    take = need
+    if (take > api.getInventoryItemAmount(playerId, "Ammo")) take = api.getInventoryItemAmount(playerId, "Ammo")
+    api.removeItemName(playerId, "Ammo", take)
+    att = item.attributes || {}
+    att.shotsLeft = shots + take
+    if (att.shotsLeft > p.mag) att.shotsLeft = p.mag
+    api.setItemSlot(playerId, p.slot, item.name, 1, att)
+    api.broadcastSound("pickUp", 0.4, 0.7, { playerIdOrPos: playerId })
+}
